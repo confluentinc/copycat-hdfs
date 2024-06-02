@@ -359,6 +359,8 @@
                 </exclusion>
             </exclusions>
         </dependency>
+        <!-- explicitly add slider-core as the dependencyManagement does not seem to override
+        the import of org.apache.hive:hive-llap-server -->
         <dependency>
             <groupId>io.confluent</groupId>
             <artifactId>confluent-log4j</artifactId>

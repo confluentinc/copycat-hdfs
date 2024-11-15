@@ -19,6 +19,7 @@ import io.confluent.connect.hdfs.avro.AvroIOException;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.IllegalWorkerStateException;
@@ -85,6 +86,7 @@ public class TopicPartitionWriter {
   private final SinkTaskContext context;
   private int recordCounter;
   private final int flushSize;
+  private final long flushFileSize;
   private final long rotateIntervalMs;
   private Long lastRotate;
   private final long rotateScheduleIntervalMs;
@@ -194,6 +196,7 @@ public class TopicPartitionWriter {
 
     topicsDir = config.getTopicsDirFromTopic(tp.topic());
     flushSize = config.getInt(HdfsSinkConnectorConfig.FLUSH_SIZE_CONFIG);
+    flushFileSize = config.getFlushFileSize();
     rotateIntervalMs = config.getLong(HdfsSinkConnectorConfig.ROTATE_INTERVAL_MS_CONFIG);
     rotateScheduleIntervalMs = config.getLong(HdfsSinkConnectorConfig
         .ROTATE_SCHEDULE_INTERVAL_MS_CONFIG);
@@ -608,12 +611,28 @@ public class TopicPartitionWriter {
       lastRotate = lastRotate == null ? currentTimestamp : lastRotate;
     }
 
+    Long fileSize = null;
+    if (currentRecord != null && flushFileSize > 0) {
+      io.confluent.connect.storage.format.RecordWriter writer = getWriter(
+          currentRecord,
+          partitioner.encodePartition(currentRecord)
+      );
+      if (!(writer instanceof FileSizeAwareRecordWriter)) {
+        throw new ConfigException("The Format's provided RecordWriterProvider does not support "
+            + "FileSizeAwareRecordWriter and cannot be used with flush.file.size > 0.");
+      }
+      fileSize = ((FileSizeAwareRecordWriter) writer).getFileSize();
+    }
+
     boolean periodicRotation = rotateIntervalMs > 0
         && currentTimestamp != null
         && lastRotate != null
         && currentTimestamp - lastRotate >= rotateIntervalMs;
     boolean scheduledRotation = rotateScheduleIntervalMs > 0 && now >= nextScheduledRotate;
-    boolean messageSizeRotation = recordCounter >= flushSize;
+    boolean messageSizeRotation = flushSize > 0 && recordCounter >= flushSize;
+    boolean fileSizeRotation = flushFileSize > 0
+        && fileSize != null
+        && fileSize >= flushFileSize;
 
     log.trace(
         "Should apply periodic time-based rotation (rotateIntervalMs: '{}', lastRotate: "
@@ -640,7 +659,14 @@ public class TopicPartitionWriter {
         messageSizeRotation
     );
 
-    return periodicRotation || scheduledRotation || messageSizeRotation;
+    log.trace(
+        "Should apply file size-based rotation (file size {} >= flush file size {})? {}",
+        fileSize,
+        flushFileSize,
+        fileSizeRotation
+    );
+
+    return periodicRotation || scheduledRotation || messageSizeRotation || fileSizeRotation;
   }
 
   /**

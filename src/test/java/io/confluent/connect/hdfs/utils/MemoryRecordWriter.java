@@ -15,15 +15,14 @@
 
 package io.confluent.connect.hdfs.utils;
 
+import io.confluent.connect.hdfs.FileSizeAwareRecordWriter;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
 
 import java.util.List;
 import java.util.Map;
 
-import io.confluent.connect.hdfs.RecordWriter;
-
-public class MemoryRecordWriter implements io.confluent.connect.storage.format.RecordWriter {
+public class MemoryRecordWriter implements FileSizeAwareRecordWriter {
   private String filename;
   private static final Map<String, List<Object>> data = Data.getData();
   private Failure failure = Failure.noFailure;
@@ -45,7 +44,6 @@ public class MemoryRecordWriter implements io.confluent.connect.storage.format.R
       throw new ConnectException("write failed.");
     }
     data.get(filename).add(record);
-
   }
 
   @Override
@@ -61,5 +59,10 @@ public class MemoryRecordWriter implements io.confluent.connect.storage.format.R
 
   public void setFailure(Failure failure) {
     this.failure = failure;
+  }
+
+  @Override
+  public long getFileSize() {
+    return 0;
   }
 }

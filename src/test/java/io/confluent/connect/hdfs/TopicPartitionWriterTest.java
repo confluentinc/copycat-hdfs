@@ -15,10 +15,15 @@
 
 package io.confluent.connect.hdfs;
 
+import com.google.common.collect.ImmutableMap;
+import io.confluent.connect.hdfs.string.StringDataFileReader;
+import io.confluent.connect.hdfs.string.StringFormat;
+import io.confluent.connect.hdfs.string.StringRecordWriterProvider;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
@@ -30,11 +35,13 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -60,6 +67,7 @@ import io.confluent.connect.storage.partitioner.HourlyPartitioner;
 import io.confluent.connect.storage.partitioner.PartitionerConfig;
 import io.confluent.connect.storage.wal.WAL;
 
+import static io.confluent.connect.hdfs.HdfsSinkConnectorConfig.FLUSH_FILE_SIZE_CONFIG;
 import static io.confluent.connect.storage.StorageSinkConnectorConfig.FLUSH_SIZE_CONFIG;
 import static org.apache.kafka.common.utils.Time.SYSTEM;
 import static org.junit.Assert.assertEquals;
@@ -346,6 +354,78 @@ public class TopicPartitionWriterTest extends TestWithMiniDFSCluster {
 
     // should not throw
     topicPartitionWriter.close();
+  }
+
+  @Test
+  public void testWriteStringRecordWithFlushFileSize() throws Exception {
+    setUp();
+
+    properties.put(FLUSH_SIZE_CONFIG, "0");
+    properties.put(HdfsSinkConnectorConfig.FORMAT_CLASS_CONFIG, StringFormat.class.getName());
+    properties.put(FLUSH_FILE_SIZE_CONFIG, String.valueOf(StringRecordWriterProvider.WRITER_BUFFER_SIZE - 8192));
+    connectorConfig = new HdfsSinkConnectorConfig(properties);
+
+    Partitioner partitioner = new DefaultPartitioner();
+    partitioner.configure(ImmutableMap.of("directory.delim", "/"));
+
+    TopicPartitionWriter topicPartitionWriter = new TopicPartitionWriter(
+            TOPIC_PARTITION,
+            storage,
+            writerProvider,
+            new StringFormat(storage).getRecordWriterProvider(),
+            partitioner,
+            connectorConfig,
+            context,
+            avroData,
+            time
+    );
+
+    List<SinkRecord> sinkRecords = new LinkedList<>();
+
+    final List<Integer> partitions = Arrays.asList(0, 1);
+    final int filesPerPartition = 5;
+    for (int partition : partitions) {
+      int offset = 0;
+      // 5 files that are just above the maxFileSize
+      for (int i = 0; i < filesPerPartition; i++) {
+        for (int j = 0; j < StringRecordWriterProvider.WRITER_BUFFER_SIZE / 2; j++) {
+          // 2 bytes per record ('i' and '\n')
+          sinkRecords.add(new SinkRecord(
+              TOPIC,
+              partition,
+              Schema.STRING_SCHEMA,
+              "key",
+              null,
+              String.valueOf(j % 10),
+              offset++,
+              null,
+              TimestampType.CREATE_TIME
+          ));
+        }
+      }
+    }
+
+    for (SinkRecord record : sinkRecords) {
+      topicPartitionWriter.buffer(record);
+    }
+
+    topicPartitionWriter.write();
+    topicPartitionWriter.close();
+
+    // we expect 5 files per partition, of which there are 2
+    StringDataFileReader stringDataFileReader = new StringDataFileReader();
+    long writtenRecords = 0;
+    for (int partition : partitions) {
+      List<FileStatus> files = storage.list("/test/test-topic/test-topic/partition=" + partition);
+      assertEquals(filesPerPartition, files.size());
+
+      for (FileStatus info : files) {
+        Collection<Object> result = stringDataFileReader.readData(connectorConfig.getHadoopConfiguration(), info.getPath());
+        writtenRecords += result.size();
+      }
+    }
+
+    assertEquals(sinkRecords.size(), writtenRecords);
   }
 
   @Test

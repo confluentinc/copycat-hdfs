@@ -15,7 +15,7 @@
 
 package io.confluent.connect.hdfs.parquet;
 
-import io.confluent.connect.storage.format.RecordWriter;
+import io.confluent.connect.hdfs.FileSizeAwareRecordWriter;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.hadoop.fs.Path;
 import org.apache.kafka.connect.data.Schema;
@@ -49,8 +49,9 @@ public class ParquetRecordWriterProvider
   }
 
   @Override
-  public RecordWriter getRecordWriter(HdfsSinkConnectorConfig conf, String filename) {
-    return new RecordWriter() {
+  public FileSizeAwareRecordWriter getRecordWriter(HdfsSinkConnectorConfig conf, String filename) {
+    return new FileSizeAwareRecordWriter() {
+      private long fileSize;
       final CompressionCodecName compressionCodecName = CompressionCodecName.SNAPPY;
       final int blockSize = 256 * 1024 * 1024;
       final int pageSize = 64 * 1024;
@@ -97,6 +98,7 @@ public class ParquetRecordWriterProvider
         Object value = avroData.fromConnectData(record.valueSchema(), record.value());
         try {
           writer.write((GenericRecord) value);
+          fileSize = writer.getDataSize();
         } catch (IOException e) {
           throw new ConnectException(e);
         }
@@ -107,6 +109,8 @@ public class ParquetRecordWriterProvider
         if (writer != null) {
           try {
             writer.close();
+            // ParquetWriter keeps track of buffer and the actual written size,
+            // so we do not need to update fileSize
           } catch (IOException e) {
             throw new ConnectException(e);
           }
@@ -115,6 +119,11 @@ public class ParquetRecordWriterProvider
 
       @Override
       public void commit() {}
+
+      @Override
+      public long getFileSize() {
+        return fileSize;
+      }
     };
   }
 }

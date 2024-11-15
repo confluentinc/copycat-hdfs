@@ -16,7 +16,7 @@
 package io.confluent.connect.hdfs.orc;
 
 import io.confluent.connect.hdfs.HdfsSinkConnectorConfig;
-import io.confluent.connect.storage.format.RecordWriter;
+import io.confluent.connect.hdfs.FileSizeAwareRecordWriter;
 import io.confluent.connect.storage.format.RecordWriterProvider;
 import io.confluent.connect.storage.hive.HiveSchemaConverter;
 import org.apache.hadoop.fs.Path;
@@ -45,10 +45,11 @@ public class OrcRecordWriterProvider implements RecordWriterProvider<HdfsSinkCon
   }
 
   @Override
-  public RecordWriter getRecordWriter(HdfsSinkConnectorConfig conf, String filename) {
+  public FileSizeAwareRecordWriter getRecordWriter(HdfsSinkConnectorConfig conf, String filename) {
     Path path = new Path(filename);
 
-    return new RecordWriter() {
+    return new FileSizeAwareRecordWriter() {
+      private long fileSize;
       Writer writer;
       TypeInfo typeInfo;
       Schema schema;
@@ -98,6 +99,7 @@ public class OrcRecordWriterProvider implements RecordWriterProvider<HdfsSinkCon
                 "Top level type must be STRUCT but was " + schema.type().getName()
             );
           }
+          fileSize = writer.getRawDataSize();
         } catch (IOException e) {
           throw new ConnectException("Failed to write record: ", e);
         }
@@ -108,6 +110,7 @@ public class OrcRecordWriterProvider implements RecordWriterProvider<HdfsSinkCon
         try {
           if (writer != null) {
             writer.close();
+            fileSize = writer.getRawDataSize();
           }
         } catch (IOException e) {
           throw new ConnectException("Failed to close ORC writer:", e);
@@ -116,6 +119,11 @@ public class OrcRecordWriterProvider implements RecordWriterProvider<HdfsSinkCon
 
       @Override
       public void commit() { }
+
+      @Override
+      public long getFileSize() {
+        return fileSize;
+      }
     };
   }
 }

@@ -17,6 +17,8 @@ package io.confluent.connect.hdfs.json;
 
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.confluent.connect.hdfs.FileSizeAwareRecordWriter;
+import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.json.JsonConverter;
@@ -30,7 +32,6 @@ import java.nio.charset.StandardCharsets;
 
 import io.confluent.connect.hdfs.HdfsSinkConnectorConfig;
 import io.confluent.connect.hdfs.storage.HdfsStorage;
-import io.confluent.connect.storage.format.RecordWriter;
 import io.confluent.connect.storage.format.RecordWriterProvider;
 
 /**
@@ -65,12 +66,14 @@ public class JsonRecordWriterProvider implements RecordWriterProvider<HdfsSinkCo
   }
 
   @Override
-  public RecordWriter getRecordWriter(HdfsSinkConnectorConfig conf, String filename) {
+  public FileSizeAwareRecordWriter getRecordWriter(HdfsSinkConnectorConfig conf, String filename) {
     try {
-      return new RecordWriter() {
-        final OutputStream out = storage.create(filename, true);
+      return new FileSizeAwareRecordWriter() {
+
+        private long fileSize;
+        final FSDataOutputStream out = storage.create(filename, true);
         final JsonGenerator writer = mapper.getFactory()
-            .createGenerator(out)
+            .createGenerator((OutputStream) out)
             .setRootValueSeparator(null);
 
         @Override
@@ -89,6 +92,7 @@ public class JsonRecordWriterProvider implements RecordWriterProvider<HdfsSinkCo
               writer.writeObject(value);
               writer.writeRaw(LINE_SEPARATOR);
             }
+            fileSize = out.getPos();
           } catch (IOException e) {
             throw new ConnectException(e);
           }
@@ -101,9 +105,15 @@ public class JsonRecordWriterProvider implements RecordWriterProvider<HdfsSinkCo
         public void close() {
           try {
             writer.close();
+            fileSize = out.getPos();
           } catch (IOException e) {
             throw new ConnectException(e);
           }
+        }
+
+        @Override
+        public long getFileSize() {
+          return fileSize;
         }
       };
     } catch (IOException e) {

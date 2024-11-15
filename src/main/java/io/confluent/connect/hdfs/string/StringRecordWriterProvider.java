@@ -15,6 +15,8 @@
 
 package io.confluent.connect.hdfs.string;
 
+import io.confluent.connect.hdfs.FileSizeAwareRecordWriter;
+import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.slf4j.Logger;
@@ -22,13 +24,11 @@ import org.slf4j.LoggerFactory;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.Charset;
 
 import io.confluent.connect.hdfs.HdfsSinkConnectorConfig;
 import io.confluent.connect.hdfs.storage.HdfsStorage;
-import io.confluent.connect.storage.format.RecordWriter;
 import io.confluent.connect.storage.format.RecordWriterProvider;
 
 /**
@@ -38,7 +38,7 @@ public class StringRecordWriterProvider implements RecordWriterProvider<HdfsSink
 
   private static final Logger log = LoggerFactory.getLogger(StringRecordWriterProvider.class);
   private static final String EXTENSION = ".txt";
-  private static final int WRITER_BUFFER_SIZE = 128 * 1024;
+  public static final int WRITER_BUFFER_SIZE = 128 * 1024;
   private final HdfsStorage storage;
 
   /**
@@ -56,9 +56,13 @@ public class StringRecordWriterProvider implements RecordWriterProvider<HdfsSink
   }
 
   @Override
-  public RecordWriter getRecordWriter(final HdfsSinkConnectorConfig conf, final String filename) {
-    return new RecordWriter() {
-      final OutputStream out = storage.create(filename, true);
+  public FileSizeAwareRecordWriter getRecordWriter(
+      final HdfsSinkConnectorConfig conf,
+      final String filename
+  ) {
+    return new FileSizeAwareRecordWriter() {
+      private long fileSize;
+      final FSDataOutputStream out = storage.create(filename, true);
       final OutputStreamWriter streamWriter = new OutputStreamWriter(out, Charset.defaultCharset());
       final BufferedWriter writer = new BufferedWriter(streamWriter, WRITER_BUFFER_SIZE);
 
@@ -68,6 +72,7 @@ public class StringRecordWriterProvider implements RecordWriterProvider<HdfsSink
           String value = (String) record.value();
           writer.write(value);
           writer.newLine();
+          fileSize = out.getPos();
         } catch (IOException e) {
           throw new ConnectException(e);
         }
@@ -80,9 +85,15 @@ public class StringRecordWriterProvider implements RecordWriterProvider<HdfsSink
       public void close() {
         try {
           writer.close();
+          fileSize = out.getPos();
         } catch (IOException e) {
           throw new ConnectException(e);
         }
+      }
+
+      @Override
+      public long getFileSize() {
+        return fileSize;
       }
     };
   }

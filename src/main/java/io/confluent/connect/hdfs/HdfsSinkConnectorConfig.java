@@ -157,6 +157,12 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
   private static final String KERBEROS_TICKET_RENEW_PERIOD_MS_DISPLAY = "Kerberos Ticket Renew "
       + "Period (ms)";
 
+  public static final String FLUSH_FILE_SIZE_CONFIG = "flush.file.size";
+  private static final long FLUSH_FILE_SIZE_DEFAULT = 0;
+  private static final String FLUSH_FILE_SIZE_DOC = "Bytes written to a single file before "
+      + "invoking commits for all files in the current partition.";
+  private static final String FLUSH_FILE_SIZE_DISPLAY = "Flush File Size";
+
   private static final Pattern SUBSTITUTION_PATTERN = Pattern.compile("\\$\\{(\\d+)}");
   private static final Pattern INVALID_SUB_PATTERN = Pattern.compile("\\$\\{.*}");
 
@@ -366,6 +372,18 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
             TOPIC_CAPTURE_GROUPS_REGEX_DISPLAY
     );
 
+    configDef.define(
+        FLUSH_FILE_SIZE_CONFIG,
+        Type.LONG,
+        FLUSH_FILE_SIZE_DEFAULT,
+        Importance.MEDIUM,
+        FLUSH_FILE_SIZE_DOC,
+        "Connector",
+        1,
+        Width.LONG,
+        FLUSH_FILE_SIZE_DISPLAY
+    );
+
     return configDef;
   }
 
@@ -374,6 +392,7 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
   private final HiveConfig hiveConfig;
   private final PartitionerConfig partitionerConfig;
   private final Pattern topicRegexCaptureGroup;
+  private final long flushFileSize;
   private final Map<String, ComposableConfig> propertyToConfig = new HashMap<>();
   private final Set<AbstractConfig> allConfigs = new HashSet<>();
   private Configuration hadoopConfig;
@@ -400,6 +419,7 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
     addToGlobal(commonConfig);
     addToGlobal(this);
     this.url = extractUrl();
+    this.flushFileSize = Long.parseLong(props.getOrDefault(FLUSH_FILE_SIZE_CONFIG, "0"));
     try {
       String topicRegex = getString(TOPIC_CAPTURE_GROUPS_REGEX_CONFIG);
       this.topicRegexCaptureGroup = topicRegex != null ? Pattern.compile(topicRegex) : null;
@@ -415,6 +435,7 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
 
     validateDirsAndRegex();
     validateTimezone();
+    validateFlushSizes();
   }
 
   /**
@@ -432,6 +453,17 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
               ROTATE_SCHEDULE_INTERVAL_MS_CONFIG
           )
       );
+    }
+  }
+
+  private void validateFlushSizes() {
+    if (getInt(FLUSH_SIZE_CONFIG) <= 0 && flushFileSize <= 0) {
+      String message = String.format(
+          "%s and %s",
+          HdfsSinkConnectorConfig.FLUSH_SIZE_CONFIG,
+          HdfsSinkConnectorConfig.FLUSH_FILE_SIZE_CONFIG
+      );
+      throw new ConfigException(message, 0, "At least one variable must be greater than 0");
     }
   }
 
@@ -722,6 +754,10 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
           )
       );
     }
+  }
+
+  public long getFlushFileSize() {
+    return flushFileSize;
   }
 
   private static class BooleanParentRecommender implements ConfigDef.Recommender {

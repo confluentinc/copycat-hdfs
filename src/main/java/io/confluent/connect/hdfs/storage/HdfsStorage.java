@@ -19,6 +19,7 @@ import org.apache.avro.file.SeekableInput;
 import org.apache.avro.mapred.FsInput;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathFilter;
 import org.apache.kafka.common.TopicPartition;
@@ -91,7 +92,7 @@ public class HdfsStorage
     }
   }
 
-  public OutputStream create(String filename, boolean overwrite) {
+  public FSDataOutputStream create(String filename, boolean overwrite) {
     try {
       return fs.create(new Path(filename), overwrite);
     } catch (IOException e) {

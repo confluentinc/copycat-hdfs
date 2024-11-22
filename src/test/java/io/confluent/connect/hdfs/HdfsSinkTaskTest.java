@@ -28,6 +28,7 @@ import org.junit.Test;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -338,6 +339,43 @@ public class HdfsSinkTaskTest extends TestWithMiniDFSCluster {
           assertEquals(avroRecord, record);
         }
       }
+    }
+  }
+
+  @Test
+  public void testPartialRevocation() throws Exception {
+    setUp();
+
+    Collection<TopicPartition> initialAssignment = new ArrayList<>();
+    initialAssignment.add(TOPIC_PARTITION);
+    initialAssignment.add(TOPIC_PARTITION2);
+    initialAssignment.add(TOPIC_PARTITION3);
+
+    Collection<TopicPartition> revokedPartitions = new ArrayList<>();
+    revokedPartitions.add(TOPIC_PARTITION3);
+
+    String key = "key";
+    Schema schema = createSchema();
+    Struct record = createRecord(schema);
+    Collection<SinkRecord> sinkRecords = Collections.singleton(
+            new SinkRecord(TOPIC_PARTITION.topic(), TOPIC_PARTITION.partition(),
+                    Schema.STRING_SCHEMA, key, schema, record, 0));
+
+    HdfsSinkTask task = new HdfsSinkTask();
+    task.initialize(context);
+    task.start(properties);
+
+    // Given 3 owned partitions
+    task.open(initialAssignment);
+
+    // When 1 partition revoked (partial revocation)
+    task.close(revokedPartitions);
+
+    try {
+      // Should continue processing messages from the 2 left partitions (should succeed)
+      task.put(sinkRecords);
+    } finally {
+      task.stop();
     }
   }
 

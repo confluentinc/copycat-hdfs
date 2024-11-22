@@ -166,7 +166,7 @@ public class HdfsSinkTask extends SinkTask {
   public void close(Collection<TopicPartition> partitions) {
     log.debug("Closing HDFS Sink Task {}", connectorNameAndTaskId);
     if (hdfsWriter != null) {
-      hdfsWriter.close();
+      hdfsWriter.close(partitions);
     }
   }
 

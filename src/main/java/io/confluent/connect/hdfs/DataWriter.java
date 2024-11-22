@@ -465,15 +465,12 @@ public class DataWriter {
   }
 
   public void close() {
-    // Close any writers we have. We may get assigned the same partitions and end up duplicating
-    // some effort since we'll have to reprocess those messages. It may be possible to hold on to
-    // the TopicPartitionWriter and continue to use the temp file, but this can get significantly
-    // more complex due to potential failures and network partitions. For example, we may get
-    // this close, then miss a few generations of group membership, during which
-    // data may have continued to be processed and we'd have to restart from the recovery stage,
-    // make sure we apply the WAL, and only reuse the temp file if the starting offset is still
-    // valid. For now, we prefer the simpler solution that may result in a bit of wasted effort.
-    for (TopicPartitionWriter writer : topicPartitionWriters.values()) {
+    close(new HashSet<>(topicPartitionWriters.keySet()));
+  }
+
+  public void close(Collection<TopicPartition> partitions) {
+    for (TopicPartition partition: partitions) {
+      TopicPartitionWriter writer = topicPartitionWriters.get(partition);
       try {
         if (writer != null) {
           // In some failure modes, the writer might not have been created for all assignments
@@ -482,8 +479,8 @@ public class DataWriter {
       } catch (ConnectException e) {
         log.warn("Unable to close writer for topic partition {}: ", writer.topicPartition(), e);
       }
+      topicPartitionWriters.remove(partition);
     }
-    topicPartitionWriters.clear();
   }
 
   public void stop() {

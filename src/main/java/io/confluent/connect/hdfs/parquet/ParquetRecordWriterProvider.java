@@ -51,7 +51,7 @@ public class ParquetRecordWriterProvider
   @Override
   public RecordWriter getRecordWriter(HdfsSinkConnectorConfig conf, String filename) {
     return new RecordWriter() {
-      final CompressionCodecName compressionCodecName = CompressionCodecName.SNAPPY;
+      final CompressionCodecName compressionCodecName = conf.parquetCompressionCodecName();
       final int blockSize = 256 * 1024 * 1024;
       final int pageSize = 64 * 1024;
       Path path = new Path(filename);

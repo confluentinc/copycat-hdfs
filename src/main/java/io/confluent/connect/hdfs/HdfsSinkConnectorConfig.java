@@ -39,12 +39,15 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 import io.confluent.connect.hdfs.avro.AvroFormat;
 import io.confluent.connect.hdfs.json.JsonFormat;
 import io.confluent.connect.hdfs.storage.HdfsStorage;
+import io.confluent.connect.hdfs.parquet.ParquetFormat;
 import io.confluent.connect.storage.StorageSinkConnectorConfig;
 import io.confluent.connect.storage.common.ComposableConfig;
 import io.confluent.connect.storage.common.GenericRecommender;
@@ -68,6 +71,9 @@ import static io.confluent.connect.storage.common.StorageCommonConfig.TOPICS_DIR
 import static io.confluent.connect.storage.common.StorageCommonConfig.TOPICS_DIR_DOC;
 import static io.confluent.connect.storage.hive.HiveConfig.HIVE_DATABASE_CONFIG;
 import static io.confluent.connect.storage.hive.HiveConfig.HIVE_INTEGRATION_CONFIG;
+
+import org.apache.kafka.common.utils.Utils;
+import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 
 public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
 
@@ -169,7 +175,8 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
   private static final GenericRecommender PARTITIONER_CLASS_RECOMMENDER = new GenericRecommender();
   private static final ParentValueRecommender AVRO_COMPRESSION_RECOMMENDER
       = new ParentValueRecommender(FORMAT_CLASS_CONFIG, AvroFormat.class, AVRO_SUPPORTED_CODECS);
-
+  private static final ParquetCodecRecommender PARQUET_COMPRESSION_RECOMMENDER 
+      = new ParquetCodecRecommender();
   static {
     STORAGE_CLASS_RECOMMENDER.addValidValues(
         Arrays.asList(HdfsStorage.class)
@@ -340,6 +347,19 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
           hdfsAuthenticationKerberosDependentsRecommender
       );
     }
+
+    final String connectorGroup = "Connector";
+    final int latestOrderInGroup = configDef.configKeys().values().stream()
+            .filter(c -> connectorGroup.equalsIgnoreCase(c.group)) 
+            .map(c -> c.orderInGroup)
+           .max(Integer::compare).orElse(0);
+
+    StorageSinkConnectorConfig.enableParquetConfig(
+            configDef,
+            PARQUET_COMPRESSION_RECOMMENDER,
+            connectorGroup,
+            latestOrderInGroup
+    );
     // Put the storage group(s) last ...
     ConfigDef storageConfigDef = StorageSinkConnectorConfig.newConfigDef(
         FORMAT_CLASS_RECOMMENDER,
@@ -526,6 +546,12 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
 
   public Configuration getHadoopConfiguration() {
     return hadoopConfig;
+  }
+
+  public CompressionCodecName parquetCompressionCodecName() {
+    return "none".equalsIgnoreCase(getString(PARQUET_CODEC_CONFIG))
+            ? CompressionCodecName.fromConf(null)
+            : CompressionCodecName.fromConf(getString(PARQUET_CODEC_CONFIG));
   }
 
   public Map<String, ?> plainValues() {
@@ -721,6 +747,41 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
               TOPIC_SUBSTITUTION
           )
       );
+    }
+  }
+
+  private static class ParquetCodecRecommender extends ParentValueRecommender
+          implements ConfigDef.Validator {
+    public static final Map<String, CompressionCodecName> TYPES_BY_NAME;
+    public static final List<String> ALLOWED_VALUES;
+
+    static {
+      TYPES_BY_NAME = Arrays.stream(CompressionCodecName.values())
+              .filter(c -> !CompressionCodecName.UNCOMPRESSED.equals(c))
+              .collect(Collectors.toMap(c -> c.name().toLowerCase(), Function.identity()));
+      TYPES_BY_NAME.put("none", CompressionCodecName.UNCOMPRESSED);
+      ALLOWED_VALUES = new ArrayList<>(TYPES_BY_NAME.keySet());
+      // Not a hard requirement but this call usually puts 'none' first in the list of allowed
+      // values
+      Collections.reverse(ALLOWED_VALUES);
+    }
+
+    public ParquetCodecRecommender() {
+      super(FORMAT_CLASS_CONFIG, ParquetFormat.class, ALLOWED_VALUES.toArray());
+    }
+
+    @Override
+    public void ensureValid(String name, Object compressionCodecName) {
+      String compressionCodecNameString = ((String) compressionCodecName).trim();
+      if (!TYPES_BY_NAME.containsKey(compressionCodecNameString)) {
+        throw new ConfigException(name, compressionCodecName,
+                "Value must be one of: " + ALLOWED_VALUES);
+      }
+    }
+
+    @Override
+    public String toString() {
+      return "[" + Utils.join(ALLOWED_VALUES, ", ") + "]";
     }
   }
 

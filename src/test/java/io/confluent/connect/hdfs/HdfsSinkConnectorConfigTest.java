@@ -270,6 +270,19 @@ public class HdfsSinkConnectorConfigTest extends TestWithMiniDFSCluster {
   }
 
   @Test
+  public void testKerberosRefreshTicketDefault() {
+    connectorConfig = new HdfsSinkConnectorConfig(properties);
+    assertEquals(Boolean.TRUE,
+            connectorConfig.kerberosRefreshTicket());
+  }
+  @Test
+  public void testKerberosRefreshTicket() {
+    properties.put(HdfsSinkConnectorConfig.KERBEROS_REFRESH_TICKET_CONFIG, "false");
+    connectorConfig = new HdfsSinkConnectorConfig(properties);
+    assertEquals(Boolean.FALSE,
+            connectorConfig.kerberosRefreshTicket());
+  }
+  @Test
   public void testRecommendedValues() throws Exception {
     List<Object> expectedStorageClasses = Arrays.<Object>asList(HdfsStorage.class);
 

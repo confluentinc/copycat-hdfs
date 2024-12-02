@@ -170,6 +170,16 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
   private static final ParentValueRecommender AVRO_COMPRESSION_RECOMMENDER
       = new ParentValueRecommender(FORMAT_CLASS_CONFIG, AvroFormat.class, AVRO_SUPPORTED_CODECS);
 
+  //Kerberos renew ticket
+  public static final String KERBEROS_REFRESH_TICKET_CONFIG = "hdfs.kerberos.refresh.ticket";
+  private static final String KERBEROS_REFRESH_TICKET_DOC =
+          "Configuration indicating whether kerberos should refresh ticket or not.";
+  private static final boolean KERBEROS_REFRESH_TICKET_DEFAULT = true;
+  private static final String KERBEROS_REFRESH_TICKET_DISPLAY = "Kerberos refresh ticket";
+  private static final ConfigDef.Recommender KerberosRenewTicketDependentsRecommender =
+          new BooleanParentRecommender(
+                  KERBEROS_REFRESH_TICKET_CONFIG);
+
   static {
     STORAGE_CLASS_RECOMMENDER.addValidValues(
         Arrays.asList(HdfsStorage.class)
@@ -339,6 +349,18 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
           KERBEROS_TICKET_RENEW_PERIOD_MS_DISPLAY,
           hdfsAuthenticationKerberosDependentsRecommender
       );
+
+      configDef.define(
+              KERBEROS_REFRESH_TICKET_CONFIG,
+              Type.BOOLEAN,
+              KERBEROS_REFRESH_TICKET_DEFAULT,
+              Importance.LOW,
+              KERBEROS_REFRESH_TICKET_DOC,
+              group,
+              ++orderInGroup,
+              Width.SHORT,
+              KERBEROS_REFRESH_TICKET_DISPLAY
+      );
     }
     // Put the storage group(s) last ...
     ConfigDef storageConfigDef = StorageSinkConnectorConfig.newConfigDef(
@@ -501,6 +523,10 @@ public class HdfsSinkConnectorConfig extends StorageSinkConnectorConfig {
 
   public long kerberosTicketRenewPeriodMs() {
     return getLong(KERBEROS_TICKET_RENEW_PERIOD_MS_CONFIG);
+  }
+
+  public boolean kerberosRefreshTicket() {
+    return getBoolean(KERBEROS_REFRESH_TICKET_CONFIG);
   }
 
   public String logsDir() {

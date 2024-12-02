@@ -109,35 +109,45 @@ public class FileUtils {
       Path path,
       CommittedFileFilter filter
   ) {
-    if (!storage.exists(path.toString())) {
-      return null;
-    }
-    long maxOffset = -1L;
-    FileStatus fileStatusWithMaxOffset = null;
-    List<FileStatus> statuses = storage.list(path.toString());
-    for (FileStatus status : statuses) {
-      if (status.isDirectory()) {
-        FileStatus fileStatus = fileStatusWithMaxOffset(storage, status.getPath(), filter);
-        if (fileStatus != null) {
-          long offset = extractOffset(fileStatus.getPath().getName());
-          if (offset > maxOffset) {
-            maxOffset = offset;
-            fileStatusWithMaxOffset = fileStatus;
-          }
-        }
-      } else {
-        String filename = status.getPath().getName();
-        log.trace("Checked for max offset: {}", status.getPath());
-        if (filter.accept(status.getPath())) {
-          long offset = extractOffset(filename);
-          if (offset > maxOffset) {
-            maxOffset = offset;
-            fileStatusWithMaxOffset = status;
-          }
-        }
+      if (!storage.exists(path.toString())) {
+          return null;
       }
-    }
-    return fileStatusWithMaxOffset;
+      long maxOffset = -1L;
+      FileStatus fileStatusWithMaxOffset = null;
+      List <FileStatus> statuses = storage.list(path.toString());
+      for (FileStatus status: statuses) {
+          if (status.isDirectory()) {
+              FileStatus fileStatus = fileStatusWithMaxOffset(storage, status.getPath(), filter);
+              if (fileStatus != null) {
+                  if (fileStatus.getPath().getName().contains(".parquet") && fileStatus.getLen() < 8) {
+                      log.trace("Found an empty parquet file and deleting it: {}", fileStatus.getPath().getName());
+                      storage.delete(fileStatus.getPath().toString());
+                  } else {
+                      long offset = extractOffset(fileStatus.getPath().getName());
+                      if (offset > maxOffset) {
+                          maxOffset = offset;
+                          fileStatusWithMaxOffset = fileStatus;
+                      }
+                  }
+              }
+          } else {
+              String filename = status.getPath().getName();
+              log.trace("Checked for max offset: {}", status.getPath());
+              if (filter.accept(status.getPath())) {
+                  if (status.getPath().getName().contains(".parquet") && status.getLen() < 8) {
+                      log.trace("Found an empty parquet file and deleting it: {}", status.getPath().getName());
+                      storage.delete(status.getPath().toString());
+                  } else {
+                      long offset = extractOffset(filename);
+                      if (offset > maxOffset) {
+                          maxOffset = offset;
+                          fileStatusWithMaxOffset = status;
+                      }
+                  }
+              }
+          }
+      }
+      return fileStatusWithMaxOffset;
   }
 
   /**

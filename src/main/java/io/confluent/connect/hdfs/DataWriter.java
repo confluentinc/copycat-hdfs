@@ -464,6 +464,14 @@ public class DataWriter {
     }
   }
 
+  public void checkWritersForNecessityOfRotation() {
+    for (TopicPartitionWriter topicPartitionWriter : topicPartitionWriters.values()) {
+      if (topicPartitionWriter.shouldRotateAndMaybeUpdateTimers()) {
+        topicPartitionWriter.write();
+      }
+    }
+  }
+
   public void close() {
     // Close any writers we have. We may get assigned the same partitions and end up duplicating
     // some effort since we'll have to reprocess those messages. It may be possible to hold on to

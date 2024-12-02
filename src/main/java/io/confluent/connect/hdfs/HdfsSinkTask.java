@@ -143,6 +143,10 @@ public class HdfsSinkTask extends SinkTask {
     // Although the connector manages offsets via files in HDFS, we still want to have Connect
     // commit the consumer offsets for records this task has consumed from its topic partitions and
     // committed to HDFS.
+
+    // Check writers for should rotate by rotation interval
+    hdfsWriter.checkWritersForNecessityOfRotation();
+
     Map<TopicPartition, OffsetAndMetadata> result = new HashMap<>();
     for (Map.Entry<TopicPartition, Long> entry : hdfsWriter.getCommittedOffsets().entrySet()) {
       log.debug(

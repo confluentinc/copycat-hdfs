@@ -61,6 +61,7 @@ import io.confluent.connect.storage.partitioner.PartitionerConfig;
 import io.confluent.connect.storage.wal.WAL;
 
 import static io.confluent.connect.storage.StorageSinkConnectorConfig.FLUSH_SIZE_CONFIG;
+import static io.confluent.connect.storage.StorageSinkConnectorConfig.ROTATE_INTERVAL_MS_CONFIG;
 import static org.apache.kafka.common.utils.Time.SYSTEM;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -476,7 +477,7 @@ public class TopicPartitionWriterTest extends TestWithMiniDFSCluster {
     // Do not roll on size, only based on time.
     localProps.put(FLUSH_SIZE_CONFIG, "1000");
     localProps.put(
-        HdfsSinkConnectorConfig.ROTATE_INTERVAL_MS_CONFIG,
+        ROTATE_INTERVAL_MS_CONFIG,
         String.valueOf(TimeUnit.MINUTES.toMillis(1))
     );
     setUp();
@@ -525,39 +526,29 @@ public class TopicPartitionWriterTest extends TestWithMiniDFSCluster {
         Collections.singleton(new TopicPartition(TOPIC, PARTITION))
     ));
 
-    // And one last record to flush the previous ones.
-    long timestampMuchLater = first.plusHours(6).getMillis();
-    Struct lastOne = createRecordWithTimestampField(schema, timestampMuchLater);
-    sinkRecords.addAll(createSinkRecords(
-        Collections.singletonList(lastOne),
-        schema,
-        19,
-        Collections.singleton(new TopicPartition(TOPIC, PARTITION))
-    ));
-
     for (SinkRecord record : sinkRecords) {
       topicPartitionWriter.buffer(record);
     }
 
     topicPartitionWriter.recover();
     topicPartitionWriter.write();
+    assertEquals(0, topicPartitionWriter.offset());
+    time.sleep(TimeUnit.MINUTES.toMillis(2));
+    boolean shouldRotateAndMaybeUpdateTimers = topicPartitionWriter.shouldRotateAndMaybeUpdateTimers();
+    assertEquals(true, shouldRotateAndMaybeUpdateTimers);
+    topicPartitionWriter.write();
     topicPartitionWriter.close();
 
     String encodedPartitionFirst = getTimebasedEncodedPartition(timestampFirst);
     String encodedPartitionLater = getTimebasedEncodedPartition(timestampLater);
 
+    String topicsDir = this.topicsDir.get(TOPIC_PARTITION.topic());
     String dirPrefixFirst = partitioner.generatePartitionedPath(TOPIC, encodedPartitionFirst);
     Set<Path> expectedFiles = new HashSet<>();
-    String topicsDir = this.topicsDir.get(TOPIC_PARTITION.topic());
-    for (int i : new int[]{0, 3, 6}) {
-      expectedFiles.add(new Path(FileUtils.committedFileName(url, topicsDir, dirPrefixFirst, TOPIC_PARTITION, i, i + 2, extension, zeroPadFormat)));
-    }
-
+    expectedFiles.add(new Path(FileUtils.committedFileName(url, topicsDir, dirPrefixFirst, TOPIC_PARTITION, 0, 8, extension, zeroPadFormat)));
     String dirPrefixLater = partitioner.generatePartitionedPath(TOPIC, encodedPartitionLater);
-    for (int i : new int[]{9, 12, 15}) {
-      expectedFiles.add(new Path(FileUtils.committedFileName(url, topicsDir, dirPrefixLater, TOPIC_PARTITION, i, i + 2, extension, zeroPadFormat)));
-    }
-    verify(expectedFiles, 3, records, schema);
+    expectedFiles.add(new Path(FileUtils.committedFileName(url, topicsDir, dirPrefixLater, TOPIC_PARTITION, 9, 17, extension, zeroPadFormat)));
+    verify(expectedFiles, 9, records, schema);
   }
 
   @Test
@@ -565,7 +556,7 @@ public class TopicPartitionWriterTest extends TestWithMiniDFSCluster {
     // Do not roll on size, only based on time.
     localProps.put(FLUSH_SIZE_CONFIG, "1000");
     localProps.put(
-        HdfsSinkConnectorConfig.ROTATE_INTERVAL_MS_CONFIG,
+        ROTATE_INTERVAL_MS_CONFIG,
         String.valueOf(TimeUnit.MINUTES.toMillis(1))
     );
     setUp();
@@ -603,24 +594,23 @@ public class TopicPartitionWriterTest extends TestWithMiniDFSCluster {
 
     topicPartitionWriter.recover();
     topicPartitionWriter.write();
+    time.sleep(TimeUnit.MINUTES.toMillis(2));
+    boolean shouldRotateAndMaybeUpdateTimers = topicPartitionWriter.shouldRotateAndMaybeUpdateTimers();
+    assertEquals(true, shouldRotateAndMaybeUpdateTimers);
+    topicPartitionWriter.write();
     topicPartitionWriter.close();
 
     String encodedPartitionFirst = getTimebasedEncodedPartition(timestampFirst);
     String encodedPartitionLater = getTimebasedEncodedPartition(timestampLater);
 
-    String dirPrefixFirst = partitioner.generatePartitionedPath(TOPIC, encodedPartitionFirst);
     String topicsDir = this.topicsDir.get(TOPIC_PARTITION.topic());
+    String dirPrefixFirst = partitioner.generatePartitionedPath(TOPIC, encodedPartitionFirst);
     Set<Path> expectedFiles = new HashSet<>();
-    for (int i : new int[]{0, 3, 6}) {
-      expectedFiles.add(new Path(FileUtils.committedFileName(url, topicsDir, dirPrefixFirst, TOPIC_PARTITION, i, i + 2, extension, zeroPadFormat)));
-    }
+    expectedFiles.add(new Path(FileUtils.committedFileName(url, topicsDir, dirPrefixFirst, TOPIC_PARTITION, 0, 8, extension, zeroPadFormat)));
 
     String dirPrefixLater = partitioner.generatePartitionedPath(TOPIC, encodedPartitionLater);
-    // Records 15,16,17 won't be flushed until a record with a higher timestamp arrives.
-    for (int i : new int[]{9, 12}) {
-      expectedFiles.add(new Path(FileUtils.committedFileName(url, topicsDir, dirPrefixLater, TOPIC_PARTITION, i, i + 2, extension, zeroPadFormat)));
-    }
-    verify(expectedFiles, 3, records, schema);
+    expectedFiles.add(new Path(FileUtils.committedFileName(url, topicsDir, dirPrefixLater, TOPIC_PARTITION, 9, 17, extension, zeroPadFormat)));
+    verify(expectedFiles, 9, records, schema);
   }
 
   @Test
@@ -628,7 +618,7 @@ public class TopicPartitionWriterTest extends TestWithMiniDFSCluster {
     // Do not roll on size, only based on time.
     localProps.put(FLUSH_SIZE_CONFIG, "1000");
     localProps.put(
-        HdfsSinkConnectorConfig.ROTATE_INTERVAL_MS_CONFIG,
+        ROTATE_INTERVAL_MS_CONFIG,
         String.valueOf(TimeUnit.MINUTES.toMillis(1))
     );
     setUp();
@@ -658,7 +648,7 @@ public class TopicPartitionWriterTest extends TestWithMiniDFSCluster {
     long advanceMs = 20000;
     long timestampFirst = first.getMillis();
     Collection<SinkRecord> sinkRecords = createSinkRecordsWithTimestamp(records.subList(0, 9), schema, 0, timestampFirst, advanceMs);
-    long timestampLater = first.plusHours(2).getMillis();
+    long timestampLater = first.plusDays(1).getMillis();
     sinkRecords.addAll(createSinkRecordsWithTimestamp(records.subList(9, 18), schema, 9, timestampLater, advanceMs));
 
     for (SinkRecord record : sinkRecords) {
@@ -667,24 +657,90 @@ public class TopicPartitionWriterTest extends TestWithMiniDFSCluster {
 
     topicPartitionWriter.recover();
     topicPartitionWriter.write();
+    time.sleep(TimeUnit.MINUTES.toMillis(2));
+    boolean shouldRotateAndMaybeUpdateTimers = topicPartitionWriter.shouldRotateAndMaybeUpdateTimers();
+    assertEquals(true, shouldRotateAndMaybeUpdateTimers);
+    topicPartitionWriter.write();
     topicPartitionWriter.close();
 
     String encodedPartitionFirst = getTimebasedEncodedPartition(timestampFirst);
     String encodedPartitionLater = getTimebasedEncodedPartition(timestampLater);
 
     String dirPrefixFirst = partitioner.generatePartitionedPath(TOPIC, encodedPartitionFirst);
+    String dirPrefixLater = partitioner.generatePartitionedPath(TOPIC, encodedPartitionLater);
+
     Set<Path> expectedFiles = new HashSet<>();
     String topicsDir = this.topicsDir.get(TOPIC_PARTITION.topic());
-    for (int i : new int[]{0, 3, 6}) {
-      expectedFiles.add(new Path(FileUtils.committedFileName(url, topicsDir, dirPrefixFirst, TOPIC_PARTITION, i, i + 2, extension, zeroPadFormat)));
+    expectedFiles.add(new Path(FileUtils.committedFileName(url, topicsDir, dirPrefixFirst, TOPIC_PARTITION, 0, 8, extension, zeroPadFormat)));
+    expectedFiles.add(new Path(FileUtils.committedFileName(url, topicsDir, dirPrefixLater, TOPIC_PARTITION, 9, 17, extension, zeroPadFormat)));
+
+    int expectedBatchSize = 9;
+    verify(expectedFiles, expectedBatchSize, records, schema);
+  }
+
+  @Test
+  public void testCloseTempFileByRotateIntervalWithoutReadingNewRecords() throws Exception {
+    setUp();
+    // Define the partitioner
+    partitioner = new DataWriter.PartitionerWrapper(
+            new io.confluent.connect.storage.partitioner.TimeBasedPartitioner<>()
+    );
+    parsedConfig.put(PartitionerConfig.PARTITION_DURATION_MS_CONFIG, TimeUnit.DAYS.toMillis(1));
+    parsedConfig.put(PartitionerConfig.TIMESTAMP_EXTRACTOR_CLASS_CONFIG, "Record");
+    parsedConfig.put(PartitionerConfig.PATH_FORMAT_CONFIG, "'ds'=YYYYMMdd");
+    partitioner.configure(parsedConfig);
+
+    properties.put(FLUSH_SIZE_CONFIG, "1000");
+    properties.put(
+            ROTATE_INTERVAL_MS_CONFIG,
+            String.valueOf(TimeUnit.MINUTES.toMillis(1))
+    );
+    connectorConfig = new HdfsSinkConnectorConfig(properties);
+
+    TopicPartitionWriter topicPartitionWriter = new TopicPartitionWriter(
+            TOPIC_PARTITION,
+            storage,
+            writerProvider,
+            newWriterProvider,
+            partitioner,
+            connectorConfig,
+            context,
+            avroData,
+            time
+    );
+
+    Schema schema = createSchema();
+    List<Struct> records = new ArrayList<>();
+    for (int i = 0; i < 10; i++) {
+      records.add(createRecord(schema, i, 12.2f));
     }
 
-    String dirPrefixLater = partitioner.generatePartitionedPath(TOPIC, encodedPartitionLater);
-    // Records 15,16,17 won't be flushed until a record with a higher timestamp arrives.
-    for (int i : new int[]{9, 12}) {
-      expectedFiles.add(new Path(FileUtils.committedFileName(url, topicsDir, dirPrefixLater, TOPIC_PARTITION, i, i + 2, extension, zeroPadFormat)));
+    long advanceMs = 20000;
+    DateTime first = new DateTime(2023, 5, 7, 9, 0, DateTimeZone.UTC);
+    long timestamp = first.getMillis();
+    Collection<SinkRecord> sinkRecords = createSinkRecordsWithTimestamp(
+            records, schema, 0, timestamp, advanceMs
+    );
+    for (SinkRecord record : sinkRecords) {
+      topicPartitionWriter.buffer(record);
     }
-    verify(expectedFiles, 3, records, schema);
+
+    assertEquals(-1, topicPartitionWriter.offset());
+    topicPartitionWriter.write();
+    assertEquals(0, topicPartitionWriter.offset());
+    time.sleep(TimeUnit.MINUTES.toMillis(2));
+    boolean shouldRotateAndMaybeUpdateTimers = topicPartitionWriter.shouldRotateAndMaybeUpdateTimers();
+    assertEquals(true, shouldRotateAndMaybeUpdateTimers);
+    topicPartitionWriter.write();
+    assertEquals(10, topicPartitionWriter.offset());
+    topicPartitionWriter.close();
+
+    Set<Path> expectedFiles = new HashSet<>();
+    String topicsDir = this.topicsDir.get(TOPIC);
+    expectedFiles.add(new Path(url + "/" + topicsDir + "/" + TOPIC + "/ds=20230507" +
+            "/" + TOPIC + "+" + PARTITION + "+0000000000+0000000009" + extension));
+    int expectedBatchSize = 10;
+    verify(expectedFiles, expectedBatchSize, records, schema);
   }
 
   @Test
@@ -693,7 +749,7 @@ public class TopicPartitionWriterTest extends TestWithMiniDFSCluster {
     // Do not roll on size, only based on time.
     localProps.put(FLUSH_SIZE_CONFIG, "1000");
     localProps.put(
-        HdfsSinkConnectorConfig.ROTATE_INTERVAL_MS_CONFIG,
+        ROTATE_INTERVAL_MS_CONFIG,
         String.valueOf(TimeUnit.HOURS.toMillis(1))
     );
     localProps.put(

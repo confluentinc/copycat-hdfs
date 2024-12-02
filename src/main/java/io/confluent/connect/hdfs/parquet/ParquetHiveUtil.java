@@ -56,7 +56,7 @@ public class ParquetHiveUtil extends HiveUtil {
   @Override
   public void alterSchema(String database, String tableName, Schema schema) {
     Table table = hiveMetaStore.getTable(database, tableName);
-    List<FieldSchema> columns = HiveSchemaConverter.convertSchema(schema);
+    List<FieldSchema> columns = HiveSchemaConverter.convertSchemaMaybeLogical(schema);
     removeFieldPartitionColumn(columns, table.getPartitionKeys());
     table.setFields(columns);
     hiveMetaStore.alterTable(table);
@@ -83,7 +83,7 @@ public class ParquetHiveUtil extends HiveUtil {
       throw new HiveMetaStoreException("Cannot find input/output format:", e);
     }
     // convert Connect schema schema to Hive columns
-    List<FieldSchema> columns = HiveSchemaConverter.convertSchema(schema);
+    List<FieldSchema> columns = HiveSchemaConverter.convertSchemaMaybeLogical(schema);
     removeFieldPartitionColumn(columns, partitioner.partitionFields());
     table.setFields(columns);
     table.setPartCols(partitioner.partitionFields());
